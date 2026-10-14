@@ -43,6 +43,7 @@
 #include "SpirvPasses/BakeImageFormatsPass.h"
 #include "SpirvPasses/WidenImageFormatsPass.h"
 #include "SpirvPasses/ClampMultisampleFetchPass.h"
+#include "SpirvPasses/RelocateVertexImagesPass.h"
 #include "SpirvPasses/PrivateToEntryLocalPass.h"
 #include "SpirvPasses/StripUniformLocationsPass.h"
 #include "SpirvPasses/StripIoBlockLocationsPass.h"
@@ -1360,6 +1361,41 @@ namespace MobileGL {
 
                 return RunOptimizerChecked("LowerViewportIndexForEssl", optimizer, inputBinary,
                                            outputBinary, true, enableSpirvValidation);
+            }
+
+            bool ShaderCompiler::RelocateVertexImagesForEssl(const Vector<Uint32>& inputBinary,
+                                                             Vector<uint32_t>& outputBinary,
+                                                             const bool enableSpirvValidation) {
+                using namespace spvtools;
+                Optimizer optimizer(SPV_ENV_VULKAN_1_1);
+                optimizer.RegisterPass(RelocateVertexImagesPass::CreateRelocateVertexImagesPass());
+
+                return RunOptimizerChecked("RelocateVertexImagesForEssl", optimizer, inputBinary,
+                                           outputBinary, true, enableSpirvValidation);
+            }
+
+            ShaderCompiler::VertexImageRelocationProbe ShaderCompiler::ProbeVertexImageRelocation(
+                const Vector<Uint32>& binary) {
+                VertexImageRelocationProbe probe;
+                if (binary.empty()) {
+                    return probe;
+                }
+                std::unique_ptr<spvtools::opt::IRContext> context = spvtools::BuildModule(
+                    SPV_ENV_VULKAN_1_1, MakeSpirvMessageConsumer("ProbeVertexImageRelocation"),
+                    binary.data(), binary.size());
+                if (context == nullptr) {
+                    return probe;
+                }
+                Uint32 candidateCount = 0;
+                String declineReason;
+                const bool audited = AuditVertexImageRelocation(context.get(), candidateCount, declineReason);
+                // A decline names an existing image uniform, so either outcome with content
+                // answers the "declares one at all" question; the audit passing with zero
+                // candidates is a module of samplers only.
+                probe.DeclaresStorageImage = candidateCount > 0u || (!audited && !declineReason.empty());
+                probe.Relocatable = audited && candidateCount > 0u;
+                probe.DeclineReason = std::move(declineReason);
+                return probe;
             }
 
             bool ShaderCompiler::DeclaresViewportIndexBuiltin(const Vector<Uint32>& binary) {

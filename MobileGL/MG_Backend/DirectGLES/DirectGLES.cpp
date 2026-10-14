@@ -2762,7 +2762,17 @@ namespace MobileGL::MG_Backend::DirectGLES {
                 twin->GetSyncedImageUnitVersion() != currentProgram->GetImageUnitVersion() ||
                 twin->GetSnormFallbackClampOutputMask() != g_snormFallbackClampOutputMask ||
                 twin->GetUnormFallbackClampOutputMask() != g_unormFallbackClampOutputMask ||
-                twin->GetFragColorBroadcastCount() != g_fragColorBroadcastCount ||
+                // FragColor broadcast is compared as a HIGH-WATER MARK, not for equality:
+                // BroadcastLegacyFragColor replicates the output to fixed locations 1..N-1 and
+                // the driver routes every location through glDrawBuffers, so outputs beyond the
+                // draw FBO's slot count are dormant and ignored - a build made for a larger
+                // count draws correctly on any smaller one. Iris-style packs render the SAME
+                // gbuffers program onto the shadow FBO (1 attachment) and the gbuffer FBO
+                // (several) in alternating passes, and the equality test re-detached,
+                // re-transpiled and re-linked the twin at EVERY pass switch - profiled at the
+                // top of the steady-state draw path. A build only goes stale when a draw needs
+                // MORE locations than it has.
+                twin->GetFragColorBroadcastCount() < g_fragColorBroadcastCount ||
                 twin->GetShaderStorageBlockBindingSignature() !=
                     ComputeShaderStorageBlockBindingSignature(*currentProgram) ||
                 // A fourth of the same shape, and the reason glBindImageTexture itself does
@@ -3591,6 +3601,55 @@ namespace MobileGL::MG_Backend::DirectGLES {
                             samplerPassMemo.textureContextGeneration = g_backendContextGeneration;
                             samplerPassMemo.valid = true;
                         }
+                    }
+                }
+
+                // Relocated vertex-image fetches (RelocateVertexImagesPass). The transpiled
+                // sampler reads a RESERVED texture unit, and this mirrors onto it the texture
+                // the application bound to the image unit it assigned the original uniform -
+                // glUniform1i on an image uniform lands in the frontend's image-unit state, not
+                // in any texture unit - plus the level that fetch must read, which is what the
+                // synthesized mg_imglod_ uniform carries. Dedup mirrors exactly like the
+                // sampler pass above; SyncToBackend's image-unit version check rebuilds the
+                // bindings (and resets these mirrors) whenever the app re-points a uniform, so
+                // no other staleness tracking is needed. Empty for every program the relocation
+                // never armed on, which is one vector test per draw.
+                if (!backendProgram.GetRelocatedImageBindings().empty()) {
+                    for (auto& relocatedBinding : backendProgram.GetRelocatedImageBindings()) {
+                        const auto imageUnit = currentProgram->GetUniformSamplerOrImageUnitIndex(
+                            relocatedBinding.frontendLocation);
+                        if (imageUnit < 0) continue;
+                        auto& imageBinding = MG_State::pGLContext->GetImageTextureBinding(imageUnit);
+                        if (relocatedBinding.lastAssignedImageUnit != imageUnit) {
+                            // Program state: assigned once per link, re-issued only after a
+                            // rebuild reset the mirror.
+                            g_GLESFuncs.glUniform1i(relocatedBinding.backendLocation,
+                                                    relocatedBinding.reservedTextureUnit);
+                        }
+                        if (relocatedBinding.lodLocation >= 0) {
+                            const Int fetchLevel =
+                                imageBinding.Texture ? static_cast<Int>(imageBinding.Level) : 0;
+                            if (fetchLevel != relocatedBinding.lastAssignedLod) {
+                                g_GLESFuncs.glUniform1i(relocatedBinding.lodLocation, fetchLevel);
+                                relocatedBinding.lastAssignedLod = fetchLevel;
+                            }
+                        }
+                        if (imageBinding.Texture &&
+                            imageBinding.Texture != relocatedBinding.lastBoundTexture) {
+                            // The same route SyncImageTextureBinding takes, minus the image
+                            // semantics: the backend texture at its own target, on our unit -
+                            // BackendTextureObject::Bind moves the active unit and dedups
+                            // against the unit bind cache, so the frontend's own syncs stay
+                            // coherent with what this leaves behind.
+                            auto& backendTexture = TextureImpl::SyncTextureObjectToBackend(
+                                imageBinding.Texture, true);
+                            const GLenum targetGL = TextureImpl::ConvertTextureTargetToBackendGLEnum(
+                                imageBinding.Texture->GetTarget());
+                            backendTexture->Bind(targetGL,
+                                                 static_cast<Uint>(relocatedBinding.reservedTextureUnit));
+                        }
+                        relocatedBinding.lastAssignedImageUnit = imageUnit;
+                        relocatedBinding.lastBoundTexture = imageBinding.Texture;
                     }
                 }
             } else {

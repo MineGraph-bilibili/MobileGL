@@ -7110,6 +7110,50 @@ namespace MobileGL::MG_Backend::DirectGLES {
                 effectiveSpirv = &widenedImageFormatSpirv;
             }
 
+            // A driver that advertises ZERO vertex image uniforms (Mali's r38p1:
+            // GL_MAX_VERTEX_IMAGE_UNIFORMS == 0) refuses to link every program whose vertex
+            // stage imageLoad()s - which is how Solas and iterationT shadow passes read their
+            // voxel caches, and how desktop GLSL lets any stage read an image. The data is an
+            // ordinary texture at an image unit, so this rewrites the read as a texelFetch
+            // over a plain sampler fed by a synthesized mg_imglod_ Lod uniform, and the draw
+            // path mirrors the image unit's texture onto a reserved TEXTURE unit
+            // (PrgramImpl::RelocatedImageBinding). AFTER the image-format passes above on
+            // purpose: it consumes their final shapes, and a relocated sampler carries no
+            // format qualifier for them to reason about. The whole module declines - unchanged,
+            // with the offending uniform named through the probe below - when an image use has
+            // no ESSL fetch spelling.
+            //
+            // KEY MATERIAL: the arming bit is EsslTranslationKeyInputs::
+            // relocateVertexImagesArmed - a module relocated for a Mali must never be served,
+            // through the L2 memo, to a link made on a driver that advertises images, and the
+            // mg_imglod_ uniforms only exist on the relocated spelling. There is deliberately
+            // NO cheap gate in front of the wrapper: the pass self-gates on the module's own
+            // content (SuccessWithoutChange for every module that declares no storage image),
+            // and probing first would put a second BuildModule on every Solas-class stage -
+            // exactly the cost the shared probe below exists to avoid. The probe is reached
+            // only on failure, when the decline reason is the whole diagnostic value.
+            //
+            // DirectVulkan is deliberately not given this: its image uniforms are descriptors
+            // the hardware loads in any stage.
+            Vector<unsigned int> relocatedImageSpirv;
+            const Bool vertexImageRelocationArmed =
+                glShaderType == GL_VERTEX_SHADER && g_GLESCapabilities.MaxVertexImageUniforms == 0;
+            if (vertexImageRelocationArmed &&
+                !MG_Util::ShaderTranspiler::ShaderCompiler::RelocateVertexImagesForEssl(
+                    *effectiveSpirv, relocatedImageSpirv, enableSpirvValidation)) {
+                const auto relocationProbe =
+                    MG_Util::ShaderTranspiler::ShaderCompiler::ProbeVertexImageRelocation(*effectiveSpirv);
+                outError = relocationProbe.DeclaresStorageImage && !relocationProbe.Relocatable
+                               ? "the vertex stage declares an image uniform this backend cannot "
+                                 "relocate onto a texture fetch: " + relocationProbe.DeclineReason
+                               : "RelocateVertexImagesForEssl failed on the vertex stage module";
+                return false;
+            }
+            if (vertexImageRelocationArmed && !relocatedImageSpirv.empty() &&
+                relocatedImageSpirv != *effectiveSpirv) {
+                effectiveSpirv = &relocatedImageSpirv;
+            }
+
             // GLSL ES demands a constant integral expression to index a fragment output
             // array; SPIR-V does not, so a shader that writes coeff[i] from a loop
             // reaches SPIRV-Cross intact and comes out as ESSL a strict driver rejects
@@ -7471,6 +7515,9 @@ namespace MobileGL::MG_Backend::DirectGLES {
             m_backendProgramUsable = true;
             m_snormFallbackClampOutputMask = g_snormFallbackClampOutputMask;
             m_unormFallbackClampOutputMask = g_unormFallbackClampOutputMask;
+            // High-water mark, matching the draw-path gate: a rebuild only happens when a draw
+            // needs MORE locations than this build has, so the stored value is the max seen so
+            // far. Outputs beyond the draw FBO's slot count are dormant (see the gate comment).
             m_fragColorBroadcastCount = g_fragColorBroadcastCount;
             // The generated ESSL bakes these in (see the SetShaderStorageBlockBinding call in the
             // transpile loop below), so the set they were generated against is part of what makes
@@ -7782,6 +7829,11 @@ namespace MobileGL::MG_Backend::DirectGLES {
                     g_GLESCapabilities.SupportsNoperspectiveInterpolation;
                 esslKeyInputs.supportsExtendedImageFormats =
                     g_GLESCapabilities.SupportsExtendedImageFormats;
+                // The EFFECTIVE arming, the same expression TranspileSpirvToEssl computes.
+                // Relocation synthesizes uniforms and rewrites declarations, so a relocated
+                // module's ESSL is materially different and must never be shared across the bit.
+                esslKeyInputs.relocateVertexImagesArmed =
+                    glShaderType == GL_VERTEX_SHADER && g_GLESCapabilities.MaxVertexImageUniforms == 0;
                 esslKeyInputs.maxColorTextureSamples = g_GLESCapabilities.MaxColorTextureSamples;
                 esslKeyInputs.maxIntegerSamples = g_GLESCapabilities.MaxIntegerSamples;
                 esslKeyInputs.maxDepthTextureSamples = g_GLESCapabilities.MaxDepthTextureSamples;
@@ -8553,6 +8605,62 @@ namespace MobileGL::MG_Backend::DirectGLES {
                     m_backendProgramId, (String(LOD_BIAS_UNIFORM_PREFIX) + elementName).c_str());
                 binding.lastAssignedLodBias = 0.0f;
                 m_samplerUniformBindings.push_back(binding);
+            }
+
+            // The relocated vertex images (RelocateVertexImagesPass). A relocated uniform is
+            // still an IMAGE uniform to the frontend reflection - glUniform1i on it assigned an
+            // image unit, exactly as the app meant it - but its ESSL spells an ordinary sampler
+            // (the pass stripped the binding decorations, so SPIRV-Cross printed none), and a
+            // location that resolves is therefore the exact test of "was this one relocated".
+            // Its draw-path unit is RESERVED here, from the top of the combined-texture range
+            // downward, skipping units the frontend currently holds anything on: the frontend's
+            // own per-draw unit sync only walks up to its touched-unit high-water mark, so a
+            // unit above it stays exactly as this backend leaves it. Rebuilt per link (and per
+            // image-unit-version rebuild), which resets the draw path's dedup mirrors with it.
+            m_relocatedImageBindings.clear();
+            if (g_GLESCapabilities.MaxVertexImageUniforms == 0 &&
+                g_GLESCapabilities.MaxCombinedTextureImageUnits > 0) {
+                Uint reservedUnitCursor = std::min<Uint>(
+                    g_GLESCapabilities.MaxCombinedTextureImageUnits,
+                    static_cast<Uint>(MG_State::GLState::TextureState::MAX_TEXTURE_IMAGE_UNITS));
+                for (Uint loc = 0; loc <= maxUniformLoc; ++loc) {
+                    const auto& name = stateProgramObject->GetUniformName(loc);
+                    if (name.empty()) continue;
+                    if (!IsImageUniformType(stateProgramObject->GetUniformType(loc))) continue;
+                    const String elementName = SubscriptUniformNameForElement(*stateProgramObject, name, loc);
+                    const Int backendLoc = g_GLESFuncs.glGetUniformLocation(m_backendProgramId, elementName.c_str());
+                    if (backendLoc < 0) continue;
+                    Int reservedUnit = -1;
+                    while (reservedUnitCursor > 0) {
+                        --reservedUnitCursor;
+                        auto& unitObject =
+                            MG_State::pGLContext->GetTextureUnitObject(static_cast<Int>(reservedUnitCursor));
+                        Bool occupied = unitObject.GetSamplerObject() != nullptr;
+                        for (const auto& slot : unitObject.GetAllBindingSlots()) {
+                            if (slot.GetBoundObject()) {
+                                occupied = true;
+                                break;
+                            }
+                        }
+                        if (!occupied) {
+                            reservedUnit = static_cast<Int>(reservedUnitCursor);
+                            break;
+                        }
+                    }
+                    if (reservedUnit < 0) {
+                        MGLOG_E_ONCE("Program %u: no free texture unit left to reserve for relocated "
+                                     "image uniform '%s'; its vertex fetches read an unbound unit.",
+                                     stateProgramObject->GetExternalIndex(), elementName.c_str());
+                        continue;
+                    }
+                    RelocatedImageBinding binding;
+                    binding.frontendLocation = loc;
+                    binding.backendLocation = backendLoc;
+                    binding.lodLocation = g_GLESFuncs.glGetUniformLocation(
+                        m_backendProgramId, (String(VERTEX_IMAGE_LOD_UNIFORM_PREFIX) + elementName).c_str());
+                    binding.reservedTextureUnit = reservedUnit;
+                    m_relocatedImageBindings.push_back(binding);
+                }
             }
         }
 

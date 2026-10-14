@@ -264,6 +264,19 @@ namespace {
                                          env.params.MaxFragmentImageUniforms,
                                          env.params.MaxComputeImageUniforms};
 
+        // The DirectGLES backend RELOCATES a vertex stage's image uniforms onto reserved
+        // texture units (RelocateVertexImagesForEssl, armed exactly when the driver reports
+        // no vertex image capacity) instead of onto image units, so on such a driver the
+        // vertex stage's images cost the implementation nothing: they count against no
+        // per-stage limit (limits[0] is the 0 the driver reported) and against no combined
+        // one. The stage is skipped below while the relocation is armed so the check stays
+        // honest for programs the backend can actually run; a module the relocation cannot
+        // carry (a fetch form the pass declines) still fails, later, with the transpiler's
+        // own specific reason rather than a bare count. Backend-gated, like the arming
+        // itself: a DirectVulkan context on the same driver keeps the strict count.
+        const bool vertexImagesRelocated =
+            env.backend == MobileGL::BackendType::DirectGLES && env.params.MaxVertexImageUniforms == 0;
+
         // Reflection spells an image ARRAY one of two ways, and which one it picks depends on how
         // the shader indexed it: a variable index makes glslang expand the array into one entry
         // per element ("u_image[0]".."u_image[8]", each carrying the ELEMENT type), while an
@@ -294,6 +307,9 @@ namespace {
             Array<ImageUse, kStageCount>* use = nullptr;
             for (SizeT stage = 0; stage < kStageCount; ++stage) {
                 if ((static_cast<unsigned>(uniform.stages) & (1u << static_cast<unsigned>(kStages[stage]))) == 0) {
+                    continue;
+                }
+                if (stage == 0 && vertexImagesRelocated) {
                     continue;
                 }
                 // The one insert this uniform performs, so the reference survives the rest of the

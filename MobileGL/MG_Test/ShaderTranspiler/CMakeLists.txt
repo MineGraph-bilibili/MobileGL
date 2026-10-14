@@ -17,6 +17,7 @@ add_executable(
         LegalizeResourceArrayIndexTest.cpp
         FlattenAtomicCounterBlockTest.cpp
         WidenImageFormatsTest.cpp
+        RelocateVertexImagesTest.cpp
         GlslangCaptureTest.cpp
         DemotePointSizeTest.cpp
 )

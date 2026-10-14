@@ -1512,6 +1512,25 @@ namespace MobileGL::MG_Backend::DirectGLES {
                 Float lastAssignedLodBias = 0.0f;
             };
 
+            // A VERTEX-stage image uniform RelocateVertexImagesPass turned into a plain
+            // sampler plus an mg_imglod_<name> Lod uniform - the shape a driver advertising
+            // zero vertex image uniforms (Mali r38p1) can link. The fetch reads the TEXTURE
+            // the application bound to the image unit it assigned the original uniform, which
+            // the draw path mirrors onto a reserved TEXTURE unit no app bind can reach
+            // (reserved from the top of the combined range in CacheResourceLocations). The
+            // lastAssigned mirrors are per-draw dedup state exactly like the sampler binding's.
+            struct RelocatedImageBinding {
+                Uint frontendLocation = 0; // the ORIGINAL image uniform's frontend location
+                Int backendLocation = -1;  // the relocated sampler's location in the ESSL
+                Int lodLocation = -1;      // mg_imglod_<name>, -1 when the module fetches nothing
+                Int reservedTextureUnit = -1;
+                Int lastAssignedImageUnit = -1;
+                Int lastAssignedLod = -1;
+                // The texture last mirrored onto the reserved unit, for the per-draw early-out
+                // (compared by identity against the image binding's current texture).
+                SharedPtr<MG_State::GLState::ITextureObject> lastBoundTexture;
+            };
+
             // Memo of the whole per-draw sampler-uniform pass (glUniform1i unit
             // assignments, lod-bias uniform, raw-depth-fetch substitution and the
             // per-unit sampler-object binds) in BindCurrentProgramWithResources.
@@ -1617,6 +1636,7 @@ namespace MobileGL::MG_Backend::DirectGLES {
             Bool HasGlobalUboBlock() const { return m_globalUboBackendBlockIndex >= 0; }
             const Vector<Int>& GetUniformBlockBackendIndices() const { return m_uniformBlockBackendIndices; }
             Vector<SamplerUniformBinding>& GetSamplerUniformBindings() { return m_samplerUniformBindings; }
+            Vector<RelocatedImageBinding>& GetRelocatedImageBindings() { return m_relocatedImageBindings; }
             Uint32 GetLastUploadedGlobalUboVersion() const { return m_lastUploadedGlobalUboVersion; }
             void SetLastUploadedGlobalUboVersion(Uint32 version) { m_lastUploadedGlobalUboVersion = version; }
             // Backend-reported GL_UNIFORM_BLOCK_DATA_SIZE of the global block; ring
@@ -1730,6 +1750,7 @@ namespace MobileGL::MG_Backend::DirectGLES {
             Int m_globalUboBackendBlockSize = 0;
             Vector<Int> m_uniformBlockBackendIndices; // frontend block index -> backend index (-1 = absent)
             Vector<SamplerUniformBinding> m_samplerUniformBindings;
+            Vector<RelocatedImageBinding> m_relocatedImageBindings;
             Uint32 m_lastUploadedGlobalUboVersion = ~0u;
             BufferImpl::UboRingAllocation m_globalUboRingAllocation;
             Uint32 m_syncedLinkVersion = ~0u;

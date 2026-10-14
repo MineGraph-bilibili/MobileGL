@@ -90,6 +90,36 @@ namespace MobileGL {
                 // above has anything to do. The gate that keeps every other stage off an
                 // optimizer round trip it does not need.
                 static bool DeclaresMultisampledImage(const Vector<Uint32>& binary);
+                // Rewrites every storage image (OpTypeImage with Sampled = 2) the module's
+                // VERTEX stage reads into the sampled shape, and every OpImageRead on it into
+                // OpImageFetch fed by a synthesized `mg_imglod_<name>` Lod uniform - the shape
+                // SPIRV-Cross prints as an ordinary `uniform sampler2D` plus texelFetch, which
+                // every GLES driver supports, where vertex IMAGE uniforms are the thing Mali's
+                // r38p1 advertises zero of (GL_MAX_VERTEX_IMAGE_UNIFORMS = 0) and so loses every
+                // shadow program of a pack like Solas or iterationT to. The image unit's texture
+                // is bound at a reserved TEXTURE unit by the backend draw path instead
+                // (RelocatedImageBinding). The whole module declines - unchanged, caller gets a
+                // reason - when any image use is not OpLoad -> (OpImageRead | size query), or
+                // the shape has no ESSL fetch spelling. Only for the DirectGLES transpile path,
+                // and only when the driver advertises no vertex images; the arming bit is L2 key
+                // material (EsslTranslationKeyInputs::relocateVertexImagesArmed). See
+                // RelocateVertexImagesPass.
+                static bool RelocateVertexImagesForEssl(const Vector<Uint32>& inputBinary,
+                                                        Vector<uint32_t>& outputBinary,
+                                                        bool enableSpirvValidation = false);
+                // The audit RelocateVertexImagesForEssl performs, run WITHOUT rewriting the
+                // module: what the caller of a failed relocation needs to name the offending
+                // uniform in a GL error. DeclaresStorageImage is true when the module carries a
+                // vertex storage image at all; Relocatable is the audit verdict; DeclineReason
+                // names the first offender when Relocatable is false and a storage image exists.
+                // One extra module parse, so it is reached only after the wrapper failed - the
+                // success path pays nothing.
+                struct VertexImageRelocationProbe {
+                    Bool DeclaresStorageImage = false;
+                    Bool Relocatable = false;
+                    String DeclineReason;
+                };
+                static VertexImageRelocationProbe ProbeVertexImageRelocation(const Vector<Uint32>& binary);
                 // Both gate questions above answered from ONE parse. Every armed gate costs a
                 // BuildModule per shader stage, and on a driver where both are armed (Mali: no
                 // GL_OES_viewport_array AND integer multisample squeezed to 1) the separate

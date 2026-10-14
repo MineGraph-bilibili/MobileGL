@@ -649,6 +649,13 @@ namespace MobileGL::MG_Util::ShaderTranspiler {
         // masks its accesses back - so a driver that HAS the extension and one that does not get
         // materially different ESSL from the same module.
         Bool supportsExtendedImageFormats = false;
+        // Whether RelocateVertexImagesForEssl runs on this module - a VERTEX stage on a driver
+        // that advertises zero vertex image uniforms (Mali r38p1). The pass turns every image
+        // read into a texelFetch over a plain sampler plus an mg_imglod_ Lod uniform, so a
+        // module relocated for such a driver must never be served - through this cache - to a
+        // link made on one that advertises images: the mg_imglod_ uniforms would sit unread and
+        // the fetches would read unbound units.
+        Bool relocateVertexImagesArmed = false;
         Int32 maxColorTextureSamples = 0;
         Int32 maxIntegerSamples = 0;
         Int32 maxDepthTextureSamples = 0;

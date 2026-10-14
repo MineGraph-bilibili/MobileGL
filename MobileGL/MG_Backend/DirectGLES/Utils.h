@@ -520,6 +520,12 @@ namespace MobileGL::MG_Backend::DirectGLES {
         // Prefix of the per-sampler float uniform that carries GL_TEXTURE_LOD_BIAS into
         // the shader (see EmulateTextureLodBias); the suffix is the sampler's own name.
         constexpr const char* LOD_BIAS_UNIFORM_PREFIX = "mg_lodBias_";
+        // Prefix of the per-image int uniform that carries the mip level a relocated
+        // vertex image fetch reads (RelocateVertexImagesPass synthesizes one per image
+        // uniform it turns into a sampler); the suffix is the image uniform's own name.
+        // The draw path writes the image binding's Level into it, so a fetch through
+        // the relocated sampler reads exactly the level the image unit named.
+        constexpr const char* VERTEX_IMAGE_LOD_UNIFORM_PREFIX = "mg_imglod_";
         // ES has no per-texture/sampler LOD bias at all (GL_TEXTURE_LOD_BIAS is desktop
         // only; Vulkan spells it VkSamplerCreateInfo::mipLodBias), so it has to reach the
         // shader as a uniform and be folded into every lookup's level of detail. Declares
