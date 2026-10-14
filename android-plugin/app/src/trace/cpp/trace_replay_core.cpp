@@ -85,8 +85,8 @@ bool UseAngleForRequest(const Request& request) {
     if (request.backend != "DirectGLES") {
         return false;
     }
-    if (request.useAngle) {
-        return true;
+    if (request.useAngleExplicit) {
+        return request.useAngle;
     }
     const char* value = getenv("MOBILEGL_ESPRYT_USE_ANGLE");
     return value != nullptr && strcmp(value, "1") == 0;
@@ -148,6 +148,11 @@ bool LoadMobileGL(const Request& request, std::string& error) {
     if (UseAngleForRequest(request)) {
         setenv("MOBILEGL_ESPRYT_USE_ANGLE", "1", 1);
         setenv("MOBILEGL_TRACE_ANGLE_VARIANT", request.angleVariant.c_str(), 1);
+    } else if (request.useAngleExplicit) {
+        // Explicit extra, false: pin the native driver. libMobileGL's ConfigLoader reads an
+        // absent variable as ANGLE-on, so "0" is the only way back.
+        setenv("MOBILEGL_ESPRYT_USE_ANGLE", "0", 1);
+        unsetenv("MOBILEGL_TRACE_ANGLE_VARIANT");
     } else {
         unsetenv("MOBILEGL_ESPRYT_USE_ANGLE");
         unsetenv("MOBILEGL_TRACE_ANGLE_VARIANT");
@@ -161,6 +166,26 @@ bool LoadMobileGL(const Request& request, std::string& error) {
         setenv("MOBILEGL_ESPRYT_AVOID_EXPLICIT_LOD_BIAS", "1", 1);
     } else {
         unsetenv("MOBILEGL_ESPRYT_AVOID_EXPLICIT_LOD_BIAS");
+    }
+    if (request.disableUnpackRing) {
+        setenv("MOBILEGL_ESPRYT_DISABLE_UNPACK_RING", "1", 1);
+    } else {
+        unsetenv("MOBILEGL_ESPRYT_DISABLE_UNPACK_RING");
+    }
+    if (request.disableUploadRing) {
+        setenv("MOBILEGL_ESPRYT_DISABLE_UPLOAD_RING", "1", 1);
+    } else {
+        unsetenv("MOBILEGL_ESPRYT_DISABLE_UPLOAD_RING");
+    }
+    if (request.disableUboRing) {
+        setenv("MOBILEGL_ESPRYT_DISABLE_UBO_RING", "1", 1);
+    } else {
+        unsetenv("MOBILEGL_ESPRYT_DISABLE_UBO_RING");
+    }
+    if (request.disableInvalidateFlush) {
+        setenv("MOBILEGL_ESPRYT_DISABLE_INVALIDATE_FLUSH", "1", 1);
+    } else {
+        unsetenv("MOBILEGL_ESPRYT_DISABLE_INVALIDATE_FLUSH");
     }
     if (request.coherentAsFlush) {
         setenv("MOBILEGL_COHERENT_AS_FLUSH", "1", 1);

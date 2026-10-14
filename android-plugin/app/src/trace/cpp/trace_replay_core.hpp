@@ -54,10 +54,20 @@ struct Request {
     int cropWidth = 0;
     int cropHeight = 0;
     double ssimThreshold = 0.99;
+    // Tri-state ANGLE selection: useAngle only means something when useAngleExplicit is
+    // set (the intent carried a use_angle extra at all). Explicit false must setenv a
+    // literal "0" - libMobileGL's ConfigLoader treats an ABSENT variable as ANGLE-on now,
+    // so the old unset-on-false left no way back to the native driver.
     bool useAngle = false;
+    bool useAngleExplicit = false;
     bool usePbuffer = true;
     bool avoidAngleLlvmpipeSamplerMipmapMinFilter = false;
     bool avoidAngleLlvmpipeExplicitLodBias = false;
+    // DirectGLES negative controls (Config.h escape hatches), for driver A/B diagnostics.
+    bool disableUnpackRing = false;
+    bool disableUploadRing = false;
+    bool disableUboRing = false;
+    bool disableInvalidateFlush = false;
     bool coherentAsFlush = false;
     bool fixIterationRPSubgroupScratch = false;
     bool deriveNumSubgroups = false;

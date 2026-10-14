@@ -118,9 +118,15 @@ Java_top_mobilegl_plugin_trace_TraceReplayActivity_nativeRunTraceReplay(JNIEnv* 
                                                                         jint cropHeight,
                                                                         jstring angleVariant,
                                                                         jboolean useAngle,
+                                                                        jboolean useAngleExplicit,
                                                                         jboolean usePbuffer,
                                                                         jboolean avoidAngleLlvmpipeSamplerMipmapMinFilter,
                                                                         jboolean avoidAngleLlvmpipeExplicitLodBias,
+                                                                        jboolean disableUnpackRing,
+                                                                        jboolean disableUploadRing,
+                                                                        jboolean disableUboRing,
+                                                                        jboolean disableInvalidateFlush,
+                                                                        jstring fboAttachmentDumps,
                                                                         jboolean coherentAsFlush,
                                                                         jboolean fixIterationRPSubgroupScratch,
                                                                         jboolean deriveNumSubgroups,
@@ -152,10 +158,16 @@ Java_top_mobilegl_plugin_trace_TraceReplayActivity_nativeRunTraceReplay(JNIEnv* 
     request.cropWidth = cropWidth;
     request.cropHeight = cropHeight;
     request.useAngle = useAngle == JNI_TRUE;
+    request.useAngleExplicit = useAngleExplicit == JNI_TRUE;
     request.usePbuffer = usePbuffer == JNI_TRUE;
     request.avoidAngleLlvmpipeSamplerMipmapMinFilter =
         avoidAngleLlvmpipeSamplerMipmapMinFilter == JNI_TRUE;
     request.avoidAngleLlvmpipeExplicitLodBias = avoidAngleLlvmpipeExplicitLodBias == JNI_TRUE;
+    request.disableUnpackRing = disableUnpackRing == JNI_TRUE;
+    request.disableUploadRing = disableUploadRing == JNI_TRUE;
+    request.disableUboRing = disableUboRing == JNI_TRUE;
+    request.disableInvalidateFlush = disableInvalidateFlush == JNI_TRUE;
+    request.fboAttachmentDumps = SplitSemicolonList(ToString(env, fboAttachmentDumps));
     request.coherentAsFlush = coherentAsFlush == JNI_TRUE;
     request.fixIterationRPSubgroupScratch = fixIterationRPSubgroupScratch == JNI_TRUE;
     request.deriveNumSubgroups = deriveNumSubgroups == JNI_TRUE;

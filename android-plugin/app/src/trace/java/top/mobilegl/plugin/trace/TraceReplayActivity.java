@@ -112,9 +112,15 @@ public final class TraceReplayActivity extends Activity {
                 request.cropHeight,
                 request.angleVariant,
                 request.useAngle,
+                request.useAngleExplicit,
                 request.usePbuffer,
                 request.avoidAngleLlvmpipeSamplerMipmapMinFilter,
                 request.avoidAngleLlvmpipeExplicitLodBias,
+                request.disableUnpackRing,
+                request.disableUploadRing,
+                request.disableUboRing,
+                request.disableInvalidateFlush,
+                request.fboAttachmentDumps,
                 request.coherentAsFlush,
                 request.fixIterationRPSubgroupScratch,
                 request.deriveNumSubgroups,
@@ -152,9 +158,15 @@ public final class TraceReplayActivity extends Activity {
             int cropHeight,
             String angleVariant,
             boolean useAngle,
+            boolean useAngleExplicit,
             boolean usePbuffer,
             boolean avoidAngleLlvmpipeSamplerMipmapMinFilter,
             boolean avoidAngleLlvmpipeExplicitLodBias,
+            boolean disableUnpackRing,
+            boolean disableUploadRing,
+            boolean disableUboRing,
+            boolean disableInvalidateFlush,
+            String fboAttachmentDumps,
             boolean coherentAsFlush,
             boolean fixIterationRPSubgroupScratch,
             boolean deriveNumSubgroups,
@@ -184,9 +196,19 @@ public final class TraceReplayActivity extends Activity {
         final int cropHeight;
         final String angleVariant;
         final boolean useAngle;
+        // True when the intent carried a use_angle extra at all; only then does useAngle
+        // mean anything (tri-state: absent = auto, true = ANGLE, false = native driver).
+        final boolean useAngleExplicit;
         final boolean usePbuffer;
         final boolean avoidAngleLlvmpipeSamplerMipmapMinFilter;
         final boolean avoidAngleLlvmpipeExplicitLodBias;
+        // DirectGLES negative controls (Config.h escape hatches), for driver A/B diagnostics.
+        final boolean disableUnpackRing;
+        final boolean disableUploadRing;
+        final boolean disableUboRing;
+        final boolean disableInvalidateFlush;
+        // Framebuffer-attachment dump points, each `CALL:DIR[:FBO,FBO,...]`, ';' separated.
+        final String fboAttachmentDumps;
         final boolean coherentAsFlush;
         final boolean fixIterationRPSubgroupScratch;
         final boolean deriveNumSubgroups;
@@ -218,9 +240,15 @@ public final class TraceReplayActivity extends Activity {
                 int cropHeight,
                 String angleVariant,
                 boolean useAngle,
+                boolean useAngleExplicit,
                 boolean usePbuffer,
                 boolean avoidAngleLlvmpipeSamplerMipmapMinFilter,
                 boolean avoidAngleLlvmpipeExplicitLodBias,
+                boolean disableUnpackRing,
+                boolean disableUploadRing,
+                boolean disableUboRing,
+                boolean disableInvalidateFlush,
+                String fboAttachmentDumps,
                 boolean coherentAsFlush,
                 boolean fixIterationRPSubgroupScratch,
                 boolean deriveNumSubgroups,
@@ -248,9 +276,15 @@ public final class TraceReplayActivity extends Activity {
             this.cropHeight = cropHeight;
             this.angleVariant = angleVariant;
             this.useAngle = useAngle;
+            this.useAngleExplicit = useAngleExplicit;
             this.usePbuffer = usePbuffer;
             this.avoidAngleLlvmpipeSamplerMipmapMinFilter = avoidAngleLlvmpipeSamplerMipmapMinFilter;
             this.avoidAngleLlvmpipeExplicitLodBias = avoidAngleLlvmpipeExplicitLodBias;
+            this.disableUnpackRing = disableUnpackRing;
+            this.disableUploadRing = disableUploadRing;
+            this.disableUboRing = disableUboRing;
+            this.disableInvalidateFlush = disableInvalidateFlush;
+            this.fboAttachmentDumps = fboAttachmentDumps;
             this.coherentAsFlush = coherentAsFlush;
             this.fixIterationRPSubgroupScratch = fixIterationRPSubgroupScratch;
             this.deriveNumSubgroups = deriveNumSubgroups;
@@ -285,9 +319,15 @@ public final class TraceReplayActivity extends Activity {
                     intent.getIntExtra("crop_height", 0),
                     readString(intent, "angle_variant", ""),
                     intent.getBooleanExtra("use_angle", false),
+                    intent.hasExtra("use_angle"),
                     intent.getBooleanExtra("use_pbuffer", false),
                     intent.getBooleanExtra("avoid_angle_llvmpipe_sampler_mipmap_min_filter", false),
                     intent.getBooleanExtra("avoid_angle_llvmpipe_explicit_lod_bias", false),
+                    intent.getBooleanExtra("disable_unpack_ring", false),
+                    intent.getBooleanExtra("disable_upload_ring", false),
+                    intent.getBooleanExtra("disable_ubo_ring", false),
+                    intent.getBooleanExtra("disable_invalidate_flush", false),
+                    readString(intent, "fbo_attachment_dumps", ""),
                     intent.getBooleanExtra("coherent_as_flush", false),
                     intent.getBooleanExtra("fix_iterationrp_subgroup_scratch", false),
                     intent.getBooleanExtra("derive_num_subgroups", false),
