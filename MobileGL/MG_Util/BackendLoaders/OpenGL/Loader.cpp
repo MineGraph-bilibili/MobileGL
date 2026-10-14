@@ -66,6 +66,33 @@ namespace MobileGL::MG_Util::BackendLoader {
 
 #endif
 
+    // ANGLE companion libraries sit NEXT TO libMobileGL.so inside the plugin APK's
+    // extracted native directory, and the game process has no reason to carry that
+    // directory on its dlopen search path - the launcher's env/library wiring does
+    // not reliably extend it (the trace variants hit this first and resolve by
+    // absolute path for exactly this reason). Resolve OUR own directory and prefer
+    // the absolute path; the bare soname stays as the fallback for the desktop
+    // launchers that do export it.
+    static void* OpenLib(const Vector<String>& names);
+    static void* OpenAngleLib(const char* name) {
+#if defined(__ANDROID__) || defined(__linux__)
+        Dl_info self{};
+        if (dladdr(reinterpret_cast<const void*>(&OpenAngleLib), &self) != 0 && self.dli_fname != nullptr) {
+            String path(self.dli_fname);
+            const SizeT separator = path.find_last_of('/');
+            if (separator != String::npos) {
+                path = path.substr(0, separator + 1) + name;
+                if (void* lib = dlopen(path.c_str(), RTLD_LOCAL | RTLD_NOW)) {
+                    MGLOG_I("Loaded GL backend library: %s", path.c_str());
+                    return lib;
+                }
+                MGLOG_W("ANGLE library not at '%s', falling back to the loader search path", path.c_str());
+            }
+        }
+#endif
+        return OpenLib({name});
+    }
+
     static void* OpenLib(const Vector<String>& names) {
 #if defined(_WIN32)
         for (const auto& name : names) {
@@ -567,7 +594,7 @@ namespace MobileGL::MG_Util::BackendLoader {
         eglLib = OpenLib({"libEGL.dll"});
 #else
         if (UseAngle()) {
-            void* glesLib = OpenLib({"libGLESv2_angle.so"});
+            void* glesLib = OpenAngleLib("libGLESv2_angle.so");
             if (!glesLib) {
                 MGLOG_E("Failed to open ANGLE libGLESv2_angle.so");
                 return;
@@ -575,7 +602,7 @@ namespace MobileGL::MG_Util::BackendLoader {
 #if defined(MOBILEGL_TRACE_ANGLE_VARIANTS) && defined(__ANDROID__)
             angleGlesLib = glesLib;
 #endif
-            eglLib = OpenLib({"libEGL_angle.so"});
+            eglLib = OpenAngleLib("libEGL_angle.so");
             if (!eglLib) {
                 MGLOG_E("Failed to open ANGLE libEGL_angle.so");
                 return;
@@ -665,7 +692,12 @@ namespace MobileGL::MG_Util::BackendLoader {
             INIT_EGL_FUNC(eglReleaseThread)
             INIT_EGL_FUNC(eglSurfaceAttrib)
             INIT_EGL_FUNC(eglSwapBuffers)
-            INIT_EGL_FUNC(eglSwapBuffersWithDamageEXT)
+            // Optional extension, resolved best-effort: ANGLE does not export
+            // eglSwapBuffersWithDamageEXT, and MobileGL itself never calls it. A null
+            // entry point here is a normal configuration, not a bring-up failure.
+            funcs.eglSwapBuffersWithDamageEXT =
+                (MG_External::EGL::eglSwapBuffersWithDamageEXT_PTR)resolveEGLProc(
+                    "eglSwapBuffersWithDamageEXT");
             INIT_EGL_FUNC(eglSwapInterval)
             INIT_EGL_FUNC(eglTerminate)
             INIT_EGL_FUNC(eglUnlockSurfaceKHR)
