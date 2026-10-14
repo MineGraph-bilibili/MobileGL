@@ -1,6 +1,11 @@
 <?xml version="1.0" encoding="utf-8"?>
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
 
+    <!-- SettingsActivity writes /sdcard/MobileGL/mobilegl.conf, the shared-storage
+         config file libMobileGL reads inside the game process (the launcher's own
+         Android/data subtree is not readable cross-app on Android 11+). -->
+    <uses-permission android:name="android.permission.MANAGE_EXTERNAL_STORAGE" />
+
     <application
         android:hasCode="true"
         android:label="${appLabel}"
@@ -21,6 +26,11 @@
             android:name=".PluginActivity"
             android:exported="true"
             android:theme="@style/Theme.MobileGLPlugin.NoDisplay" />
+
+        <activity
+            android:name=".SettingsActivity"
+            android:exported="false"
+            android:theme="@style/Theme.MobileGLPlugin" />
 
         <!-- One benchmark run per process: the backend is latched at MobileGL
              init and Espryt teardown kills the process-default EGL display, so

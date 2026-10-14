@@ -9,6 +9,7 @@
 #include "Config.h"
 
 #include <cerrno>
+#include <cstdio>
 #include <cstdlib>
 
 #ifndef _WIN32
@@ -67,6 +68,77 @@ namespace MobileGL::MG_ConfigLoader {
         } else {
             outValue = defaultValue;
         }
+    }
+
+    // The FCL launcher's per-renderer settings (the config-JSON selectable/toggleable
+    // env entries) have proven unreliable at reaching the game process: static
+    // boatEnv entries arrive, user-toggled ones may silently not. The plugin APK
+    // therefore ships its own settings screen that writes a key=value file which this
+    // code reads at init from inside the game process. A value found in the file
+    // overrides the same-named process env entry; anything the file does not mention
+    // keeps its env value or built-in default.
+    //
+    // Location matters: on Android 11+ NO app can read another app's
+    // /sdcard/Android/data/<pkg>/ subtree, not even with MANAGE_EXTERNAL_STORAGE
+    // (enforced at the FUSE layer) - verified on device, fopen failed silently. The
+    // primary location /sdcard/MobileGL/ is shared storage both sides can access
+    // (the launcher holds all-files access; the plugin requests it for the write).
+    // The plugin-private external dir is kept as a legacy fallback for devices where
+    // it works. MOBILEGL_CONFIG_FILE names an explicit file and wins over both. The
+    // first candidate that opens is used.
+    inline void InitializeAcceptedConfigFileVariables() {
+        String configFilePath;
+        QueryEnvVariable("MOBILEGL_CONFIG_FILE", configFilePath, "");
+        const char* defaultCandidates[] = {
+            "/sdcard/MobileGL/mobilegl.conf",
+            "/sdcard/Android/data/top.mobilegl.plugin/files/mobilegl.conf",
+        };
+        std::FILE* file = nullptr;
+        if (!configFilePath.empty()) {
+            file = std::fopen(configFilePath.c_str(), "rb");
+        } else {
+            for (const char* candidate : defaultCandidates) {
+                file = std::fopen(candidate, "rb");
+                if (file != nullptr) {
+                    configFilePath = candidate;
+                    break;
+                }
+            }
+        }
+        if (file == nullptr) {
+            return;
+        }
+        auto trim = [](String& text) {
+            const SizeT begin = text.find_first_not_of(" \t");
+            const SizeT end = text.find_last_not_of(" \t");
+            text = (begin == String::npos) ? String() : text.substr(begin, end - begin + 1);
+        };
+        MGLOG_I("Config: reading config file %s", configFilePath.c_str());
+        char line[512];
+        while (std::fgets(line, sizeof(line), file) != nullptr) {
+            String entry(line);
+            while (!entry.empty() && (entry.back() == '\n' || entry.back() == '\r')) {
+                entry.pop_back();
+            }
+            const SizeT pos = entry.find('=');
+            if (pos == String::npos) {
+                continue;
+            }
+            String key = entry.substr(0, pos);
+            String value = entry.substr(pos + 1);
+            trim(key);
+            trim(value);
+            if (key.empty() || key[0] == '#') {
+                continue;
+            }
+            if (!IsAcceptedPrefix(key)) {
+                MGLOG_W("Config: config file key '%s' rejected (prefix not accepted)", key.c_str());
+                continue;
+            }
+            (*acceptedEnvVariablesMap)[key] = value;
+            MGLOG_I("Config: applied config file override: %s=%s", key.c_str(), value.c_str());
+        }
+        std::fclose(file);
     }
 
     // Unified truthy rule for boolean feature env variables: set, non-empty, not "0",
@@ -165,6 +237,16 @@ namespace MobileGL::MG_ConfigLoader {
         features.EsprytEnableTextureView = QueryEnvFlag("MOBILEGL_ESPRYT_ENABLE_TEXTURE_VIEW");
         features.EnableSpirvValidation = QueryEnvFlag("MOBILEGL_ENABLE_SPIRV_VALIDATION");
         features.EsprytUseAngle = QueryEnvFlag("MOBILEGL_ESPRYT_USE_ANGLE");
+        // The Mali test channel ships ANGLE as the DEFAULT GLES provider - the plugin
+        // APK packages libGLESv2_angle.so / libEGL_angle.so next to libMobileGL.so, and
+        // the launcher's per-renderer env passing has proven unreliable (the toggle can
+        // exist without the value ever reaching this process). Absent env therefore
+        // means ANGLE ON; an explicit falsy MOBILEGL_ESPRYT_USE_ANGLE ("0") is the only
+        // way back to the native driver. The launcher toggle still forces it on.
+        if (const auto it = acceptedEnvVariablesMap->find("MOBILEGL_ESPRYT_USE_ANGLE");
+            it == acceptedEnvVariablesMap->end()) {
+            features.EsprytUseAngle = true;
+        }
 #if defined(MOBILEGL_TRACE_ANGLE_VARIANTS)
         QueryEnvVariable("MOBILEGL_TRACE_ANGLE_VARIANT", features.TraceAngleVariant, "");
 #endif
@@ -231,6 +313,7 @@ namespace MobileGL::MG_ConfigLoader {
     void Init() {
         MGLOG_D("Loading configuration from environment variables...");
         InitializeAcceptedEnvVariables();
+        InitializeAcceptedConfigFileVariables();
 
         InitBackendType();
         InitFeatures();

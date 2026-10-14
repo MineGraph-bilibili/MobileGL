@@ -97,6 +97,7 @@ public final class PostActivity extends Activity {
 
         addText("MobileGL Driver POST", 20, COLOR_TEXT, true, 0);
         statusView = addText("Running self-test...", 14, COLOR_INFO, false, dp(8));
+        addSettingsButton();
 
         boolean startWorker = false;
         boolean renderNow = false;
@@ -132,6 +133,22 @@ public final class PostActivity extends Activity {
             benchReceiver = null;
         }
         super.onDestroy();
+    }
+
+    /** Opens the in-APK renderer settings (backend switch, ANGLE on/off). */
+    private void addSettingsButton() {
+        Button button = new Button(this);
+        button.setText("渲染设置 / Renderer Settings");
+        button.setAllCaps(false);
+        button.setTextSize(TypedValue.COMPLEX_UNIT_SP, 13);
+        button.setOnClickListener(v ->
+                startActivity(new android.content.Intent(this, SettingsActivity.class)));
+        LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT,
+                LinearLayout.LayoutParams.WRAP_CONTENT
+        );
+        params.topMargin = dp(6);
+        contentLayout.addView(button, params);
     }
 
     /** Registered lazily on the first Run Bench tap; delivers results to the UI thread. */
